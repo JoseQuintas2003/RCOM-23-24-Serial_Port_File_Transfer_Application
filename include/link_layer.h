@@ -10,6 +10,20 @@ typedef enum
     LlRx,
 } LinkLayerRole;
 
+typedef enum
+{
+   START,
+   FLAG_RCV,
+   A_RCV,
+   C_RCV,
+   BCC1_OK,
+   STOP_R,
+   DATA_FOUND_ESC,
+   READING_DATA,
+   DISCONNECTED,
+   BCC2_OK
+} LinkLayerState;
+
 typedef struct
 {
     char serialPort[50];
