@@ -1,6 +1,6 @@
 // Link layer protocol implementation
 
-#include "link_layer.h"
+#include "../include/link_layer.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,20 +9,22 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
+#include <signal.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
 #define FLAG 0x7E
-#define ADR 0x03
+#define TT_ADR 0x03
+#define REC_ADR 0x01
 #define SET 0x03
 #define UA 0x07
 #define DISC 0x0B
-#define BCC (ADR^SET)
 
 #define BUF_SIZE 256
+#define BAUDRATE B38400
 
-volatile int STOP = FALSE;
+struct termios oldtio;
 
 int alarmEnabled = FALSE;
 int alarmCount = 0;
@@ -42,9 +44,10 @@ void alarmHandler(int signal)
 int llopen(LinkLayer connectionParameters)
 {
     // Program usage: Uses either COM1 or COM2
-    const char *serialPortName = argv[1];
+    const char *serialPortName = connectionParameters.serialPort;
 
-    if (argc < 2)
+    //Isto n deve ser preciso
+    /*if (argc < 2) 
     {
         printf("Incorrect program usage\n"
                "Usage: %s <SerialPort>\n"
@@ -53,6 +56,7 @@ int llopen(LinkLayer connectionParameters)
                argv[0]);
         exit(1);
     }
+    */
 
     int fd = open(connectionParameters.serialPort, O_WRONLY | O_NOCTTY);
     if (fd < 0) {
@@ -60,7 +64,6 @@ int llopen(LinkLayer connectionParameters)
         return -1; 
     }
 
-    struct termios oldtio;
     struct termios newtio;
 
     // Save current port settings
@@ -90,116 +93,128 @@ int llopen(LinkLayer connectionParameters)
 
 
     LinkLayerState state = START;
-    unsigned char byte;
 
-    if(connectionParameters.role==L1Tx){
+    //Transmitter role
+
+    if(!connectionParameters.role){
+        unsigned char byte[1];
         
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
 
-            while (connectionParameters.nRetransmissions != 0 && state != STOP_R) {
+        // Create SET packet
+        unsigned char buf[BUF_SIZE + 1] = {0};
+
+        buf[0] = FLAG;
+        buf[1] = TT_ADR;
+        buf[2] = SET;
+        buf[3] = buf[1] ^ buf[2];
+        buf[5] = FLAG;
+
+        while (alarmCount <= connectionParameters.nRetransmissions && state != STOP_R) {
             if (alarmEnabled == FALSE) {
 
-                unsigned char buf[BUF_SIZE + 1] = {0};
-
-                buf[0] = FLAG;
-                buf[1] = ADR;
-                buf[2] = SET;
-                buf[3] = BCC;
-                buf[5] = FLAG;
-                write(fd, buf, BUF_SIZE);
+                int bytes = write(fd, buf, BUF_SIZE);
                 printf("SET sent\n"); 
+                printf("Bytes written: %d\n", bytes);
 
                 alarm(connectionParameters.timeout); 
                 alarmEnabled = TRUE;
             }
 
-            while (alarmTriggered == FALSE && state != STOP_R) {
-                    if (read(fd, &byte, 1) > 0) {
-                        switch (state) {
-                            case START:
-                                if (byte == FLAG) state = FLAG_RCV;
-                                break;
-                            case FLAG_RCV:
-                                if (byte == ADR) state = A_RCV;
-                                else if (byte != FLAG) state = START;
-                                break;
-                            case A_RCV:
-                                if (byte == UA) state = C_RCV;
-                                else if (byte == FLAG) state = FLAG_RCV;
-                                else state = START;
-                                break;
-                            case C_RCV:
-                                if (byte == (ADR ^ UA)) state = BCC1_OK;
-                                else if (byte == FLAG) state = FLAG_RCV;
-                                else state = START;
-                                break;
-                            case BCC1_OK:
-                                if (byte == FLAG) state = STOP_R;
-                                else state = START;
-                                break;
-                            default: 
-                                break;
-                        }
-                    }
+            if (read(fd, byte, 1) > 0) {
+                switch (state) {
+                    case START:
+                        if (byte == FLAG) state = FLAG_RCV;
+                        break;
+                    case FLAG_RCV:
+                        if (byte == REC_ADR) state = A_RCV;
+                        else if (byte != FLAG) state = START;
+                        break;
+                    case A_RCV:
+                        if (byte == UA) state = C_RCV;
+                        else if (byte == FLAG) state = FLAG_RCV;
+                        else state = START;
+                        break;
+                    case C_RCV:
+                        if (byte == (REC_ADR ^ UA)) state = BCC1_OK;
+                        else if (byte == FLAG) state = FLAG_RCV;
+                        else state = START;
+                        break;
+                    case BCC1_OK:
+                        if (byte == FLAG) state = STOP_R;
+                        else state = START;
+                        break;
+                    default: 
+                        break;
+                }
             }
         }
     }
 
     //Receiver role
 
-    if(connectionParameters.role==L1Rx){
+    if(connectionParameters.role){
+        unsigned char byte[1];
+
+        // Create UA packet
+
+        unsigned char buf[5] = {0};
         
+        buf[0] = FLAG;
+        buf[1] = REC_ADR;
+        buf[2] = UA;
+        buf[3] = buf[1] ^ buf[2];
+        buf[5] = FLAG;
+
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
 
-            while (connectionParameters.nRetransmissions != 0 && state != STOP_R) {
-            if (alarmEnabled == FALSE) {
-                
-                buf[0] = FLAG;
-                buf[1] = ADR;
-                buf[2] = UA;
-                buf[3] = BCC;
-                buf[5] = FLAG;
+        // Auxiliary variables
+        int rec_a, rec_c;
 
-                read(fd, buf, BUF_SIZE);
-                printf("UA sent\n");
-
-                alarm(connectionParameters.timeout); 
-                alarmEnabled = TRUE;
-            }
-
-            while(state != STOP_R){
-            if (read(fd, &byte, 1) > 0) {
-                    switch (state) {
-                        case START:
-                            if (byte == FLAG) state = FLAG_RCV;
-                            break;
-                        case FLAG_RCV:
-                            if (byte == ADR) state = A_RCV;
-                            else if (byte != FLAG) state = START;
-                            break;
-                        case A_RCV:
-                            if (byte == SET) state = C_RCV;
-                            else if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case C_RCV:
-                            if (byte == (ADR ^ SET)) state = BCC1_OK;
-                            else if (byte == FLAG) state = FLAG_RCV;
-                            else state = START;
-                            break;
-                        case BCC1_OK:
-                            if (byte == FLAG) state = STOP_R;
-                            else state = START;
-                            break;
-                        default: 
-                            break;
-                    }
-                }  
-            } 
+        while (state != STOP_R) {
+            if (read(fd, byte, 1) > 0) {
+                switch (state) {
+                    case START:
+                        if (byte == FLAG) state = FLAG_RCV;
+                        break;
+                    case FLAG_RCV:
+                        if (byte == TT_ADR){
+                            state = A_RCV;
+                            rec_a = byte;
+                        }
+                        else if (byte != FLAG) state = START;
+                        break;
+                    case A_RCV:
+                        if (byte == SET){
+                            state = C_RCV;
+                            rec_c = byte;
+                        }
+                        else if (byte == FLAG) state = FLAG_RCV;
+                        else state = START;
+                        break;
+                    case C_RCV:
+                        if (byte == (TT_ADR ^ SET)) state = BCC1_OK;
+                        else if (byte == FLAG) state = FLAG_RCV;
+                        else state = START;
+                        break;
+                    case BCC1_OK:
+                        if (byte == FLAG) state = STOP_R;
+                        else state = START;
+                        break;
+                    default: 
+                        break;
+                }
+            }  
         }
+
+        int bytes = write(fd, buf, 5);
+        printf("UA sent\n"); 
+        printf("Bytes written: %d\n", bytes);
     }
+
+    /* Isto e suposto estar na funcao llclose()
 
     // Restore the old port settings
     if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
@@ -209,8 +224,9 @@ int llopen(LinkLayer connectionParameters)
     }
 
     close(fd);
+    */
 
-    return 1;
+    return fd;
 }
 
 ////////////////////////////////////////////////
@@ -236,9 +252,9 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
-int llclose(int showStatistics)
+int llclose(int fd)
 {
-
+    /*
     // Program usage: Uses either COM1 or COM2
     const char *serialPortName = argv[1];
 
@@ -334,4 +350,48 @@ int llclose(int showStatistics)
     return close(fd);
 
     return 1;
+    */
+
+   // Restore the old port settings
+    if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+    {
+        perror("tcsetattr");
+        exit(-1);
+    }
+    close(fd);
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc < 3)
+    {
+        printf("Usage: %s /dev/ttySxx tx|rx filename\n", argv[0]);
+        exit(1);
+    }
+
+    const char *serialPort = argv[1];
+
+    int individual; //mudar nome depois
+    sscanf(argv[2], "%d", &individual);
+    //const char *filename = argv[3];
+
+    LinkLayer linkLayer;
+    sprintf(linkLayer.serialPort, "%s", serialPort);
+
+    if (individual)
+        linkLayer.role = LlTx;
+    else if (!individual)
+        linkLayer.role = LlRx;
+    else
+    {
+        printf("Invalid role: %s\n", argv[2]);
+        exit(1);
+    }
+
+    int fd = llopen(linkLayer);
+
+    llclose(fd);
+
+    return 0;
 }
