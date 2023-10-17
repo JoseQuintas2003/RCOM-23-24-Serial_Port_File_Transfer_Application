@@ -20,12 +20,18 @@
 #define SET 0x03
 #define UA 0x07
 #define DISC 0x0B
+#define RR0 0x05
+#define RR1 0X85
+#define REJ0 0X01
+#define REJ1 0X81
+#define ESC 0x7D
 
 #define BUF_SIZE 256
 #define BAUDRATE B38400
 
 struct termios oldtio;
 
+int fd;
 int alarmEnabled = FALSE;
 int alarmCount = 0;
 
@@ -46,7 +52,7 @@ int llopen(LinkLayer connectionParameters)
     // Program usage: Uses either COM1 or COM2
     const char *serialPortName = connectionParameters.serialPort;
 
-    int fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY);
+    fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY);
     if (fd < 0)
     {
         perror(connectionParameters.serialPort);
@@ -238,7 +244,104 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
-    // TODO
+    unsigned char tramaTx = 0;
+    int frameSize = 6+bufSize;
+    unsigned char *frame = (unsigned char *) malloc(frameSize);
+    if (frame == NULL) {
+        // Memory allocation failed
+        printf("Memory allocation error");
+    }
+    frame[0] = FLAG;
+    frame[1] = REC_ADR;
+    frame[2] = RR0;
+    frame[3] = REC_ADR ^ RR0;
+    memcpy(frame+4,buf, bufSize);
+    unsigned char BCC2 = buf[0];
+    for (unsigned int i = 1 ; i < bufSize ; i++) BCC2 ^= buf[i];
+
+    int j = 4;
+    for (unsigned int i = 0 ; i < bufSize ; i++) {
+        if(buf[i] == FLAG || buf[i] == ESC) {
+            frame = realloc(frame,++frameSize);
+            frame[j++] = ESC;
+        }
+        frame[j++] = buf[i];
+    }
+    frame[j++] = BCC2;
+    frame[j++] = FLAG;
+
+    int retransmissions=connectionParameters.nRetransmissions;
+    int numTries = 0;
+    int rejected = 0, ready = 0;
+
+    while (numTries < retransmissions) { 
+        
+        alarmEnabled = FALSE;
+        alarm(connectionParameters.timeout);
+        rejected = 0;
+        ready = 0;
+
+        while (alarmEnabled == FALSE && !rejected && !ready) {
+
+            write(fd, frame, j);
+            unsigned char byte, C = 0;
+            LinkLayerState state = START;
+            
+            while (state != STOP_R && alarmEnabled == FALSE) {  
+                if (read(fd, &byte, 1) > 0) {
+                    switch (state) {
+                        case START:
+                            if (byte == FLAG) state = FLAG_RCV;
+                            break;
+                        case FLAG_RCV:
+                            if (byte == REC_ADR) state = A_RCV;
+                            else if (byte != FLAG) state = START;
+                            break;
+                        case A_RCV:
+                            if (byte == RR0 || byte == RR1 || byte == REJ0 || byte == REJ1 || byte == DISC){
+                                state = C_RCV;
+                                C = byte; 
+                            }
+                            else if (byte == FLAG) state = FLAG_RCV;
+                            else state = START;
+                            break;
+                        case C_RCV:
+                            if (byte == (REC_ADR ^ C)) state = BCC1_OK;
+                            else if (byte == FLAG) state = FLAG_RCV;
+                            else state = START;
+                            break;
+                        case BCC1_OK:
+                            if (byte == FLAG){
+                                state = STOP_R;
+                            }
+                            else state = START;
+                            break;
+                        default: 
+                            break;
+                    }
+                } 
+            } 
+            
+            if (state == STOP_R) {
+                if (byte == REJ0 || byte == REJ1) {
+                    rejected = 1;
+                } else if (byte == RR0 || byte == RR1) {
+                    ready = 1;
+                    tramaTx = (tramaTx + 1) % 2;
+                }
+            }
+
+        }
+        if (ready) break;
+        numTries++;
+    }
+    
+    free(frame);
+    if(ready) return frameSize;
+    else{
+        llclose(fd);
+        return -1;
+    }
 
     return 0;
 }
@@ -261,7 +364,7 @@ int llclose(int fd)
     LinkLayerState state;
     unsigned char buf[5] = {0};
     unsigned char byte[1];
-    int retransmitions;
+    int retransmissions;
 
     //Transmitter role
     if (!connectionParameters.role){
@@ -278,9 +381,9 @@ int llclose(int fd)
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
 
-        retransmitions=connectionParameters.retransmitions;
+        retransmissions=connectionParameters.nRetransmissions;
 
-        while ( retransmitions!= 0 && state != STOP_R) {
+        while ( retransmissions!= 0 && state != STOP_R) {
                     
             // Send Transmitter DISC
             int bytes = write(fd, buf, 5);
@@ -320,7 +423,7 @@ int llclose(int fd)
                     }
                 }
             } 
-            retransmitions--;
+            retransmissions--;
         }
 
         if (state != STOP_R) return -1;
@@ -353,9 +456,9 @@ int llclose(int fd)
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
 
-        retransmitions=connectionParameters.retransmitions;
+        retransmissions=connectionParameters.nRetransmissions;
 
-        while ( retransmitions!= 0 && state != STOP_R) {
+        while ( retransmissions!= 0 && state != STOP_R) {
 
             alarm(connectionParameters.timeout);
             alarmEnabled = FALSE;
@@ -390,7 +493,7 @@ int llclose(int fd)
                     }
                 }
             } 
-            retransmitions--;
+            retransmissions--;
         }
          
         if (state != STOP_R) return -1;
@@ -406,7 +509,7 @@ int llclose(int fd)
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
 
-        retransmitions=connectionParameters.retransmitions;
+        retransmissions=connectionParameters.nRetransmissions;
 
         while ( retransmitions!= 0 && state != STOP_R) {
 
@@ -443,7 +546,7 @@ int llclose(int fd)
                     }
                 }
             } 
-            retransmitions--;
+            retransmissions--;
         }
     
     if (state != STOP_R) return -1;
@@ -486,7 +589,9 @@ int main(int argc, char *argv[]){
         exit(1);
     }
 
-    int fd = llopen(linkLayer);
+    llopen(linkLayer);
+
+    //llwrite(...);
 
     llclose(fd);
 
