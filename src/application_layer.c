@@ -3,6 +3,11 @@
 #include "application_layer.h"
 #include "link_layer.h"
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
@@ -16,6 +21,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     linkLayer.baudRate = baudRate;
     linkLayer.nRetransmissions = nTries;
     linkLayer.timeout = timeout;
+    unsigned char *packet;
 
     int fd =  llopen(linkLayer);
     if (fd < 0)
@@ -63,7 +69,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
         memcpy(ControlPacketStart + 5 + ControlPacketStart[2], filename, strlen(filename));
 
-        if (llwrite(fd, ControlPacketStart, 5 + ControlPacketStart[2] + strlen(filename)) == -1)
+        if (llwrite(ControlPacketStart, ControlPacketSize) == -1)
         {
             printf("Exit: error in start packet\n");
             return -1;
@@ -85,7 +91,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             packet[3] = dataSize & 0xFF;
             memcpy(packet + 4, data, dataSize);
 
-            if (llwrite(fd, packet, packetSize) == -1)
+            if (llwrite(fd, packet) == -1)
             {
                 printf("error in data packets\n");
                 return -1;
@@ -114,7 +120,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
         memcpy(controlPacketEnd + 5 + controlPacketEnd[2], filename, strlen(filename));
 
-        if (llwrite(fd, controlPacketEnd, 5 + controlPacketEnd[2] + strlen(filename)) == -1)
+        if (llwrite(fd, controlPacketEnd) == -1)
         {
             printf("Exit: error in end packet\n");
             return -1;
@@ -127,7 +133,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     case LlRx: {
         while (1)
         {
-            while (llread(fd, packet) < 0){
+            while (llread(packet) < 0){
                 
                 if (packet[0] == 2)
                 {
@@ -144,7 +150,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                     FILE *newFile = fopen((char *)name, "wb+");
                     while (1)
                     {
-                        while (llread(fd, packet) < 0)
+                        while (llread(packet) < 0)
                             ;
                         if (packet[0] != 3)
                         {

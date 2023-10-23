@@ -41,6 +41,10 @@ struct termios oldtio;
 int fd;
 int alarmEnabled = FALSE;
 int alarmCount = 0;
+int retransmissions = 0;
+int timeout = 0;
+LinkLayerRole role;
+
 
 // Alarm function handler
 void alarmHandler(int signal)
@@ -96,10 +100,12 @@ int llopen(LinkLayer connectionParameters)
 
     LinkLayerState state;
     unsigned char byte[5] = {0};
-    unsigned char byte[1];
+    retransmissions = connectionParameters.nRetransmissions;
+    timeout = connectionParameters.timeout;
+    role = connectionParameters.role;
 
     //Transmitter role
-    if (!connectionParameters.role){
+    if (connectionParameters.role){
         state = START;
 
         // Set alarm function handler
@@ -112,7 +118,7 @@ int llopen(LinkLayer connectionParameters)
         byte[3] = byte[1] ^ byte[2];
         byte[4] = FLAG;
 
-        while (alarmCount <= connectionParameters.nRetransmissions && state != STOP_R){
+        while (alarmCount <= retransmissions && state != STOP_R){
             if (alarmEnabled == FALSE)
             {
 
@@ -121,7 +127,7 @@ int llopen(LinkLayer connectionParameters)
                 printf("SET sent\n");
                 printf("Bytes written: %d\n", bytes);
 
-                alarm(connectionParameters.timeout);
+                alarm(timeout);
                 alarmEnabled = TRUE;
             }
 
@@ -171,7 +177,7 @@ int llopen(LinkLayer connectionParameters)
     }
 
     //Receiver role
-    if (connectionParameters.role){
+    if (!connectionParameters.role){
         state = START;
 
         // Create UA packet
@@ -281,14 +287,13 @@ int llwrite(const unsigned char *byte, int bufSize)
     frame[j++] = BCC2;
     frame[j++] = FLAG;
 
-    int retransmissions=connectionParameters.nRetransmissions;
     int numTries = 0;
     int rejected = 0, ready = 0;
 
     while (numTries < retransmissions) { 
         
         alarmEnabled = FALSE;
-        alarm(connectionParameters.timeout);
+        alarm(timeout);
         rejected = 0;
         ready = 0;
 
@@ -334,9 +339,9 @@ int llwrite(const unsigned char *byte, int bufSize)
             } 
             
             if (state == STOP_R) {
-                if (byte == REJ0 || byte == REJ1) { //Aqui nao devia ser a variavel C ao inves de byte?
+                if (C == REJ0 || C == REJ1) { //Aqui nao devia ser a variavel C ao inves de byte?
                     rejected = 1;
-                } else if (byte == RR0 || byte == RR1) {
+                } else if (C == RR0 || C == RR1) {
                     ready = 1;
                     tramaTx = (tramaTx + 1) % 2;
                 }
@@ -360,12 +365,12 @@ int llwrite(const unsigned char *byte, int bufSize)
 ////////////////////////////////////////////////
 // LLREAD
 ////////////////////////////////////////////////
-int llread(int fd, unsigned char * buffer)
+int llread(unsigned char * packet)
 {
     LinkLayerState state = START;
 
     unsigned char writeBuffer[6] = {0}; // 5 bytes for information feedback plus 1 byte for the '\0' character
-    unsigned char byte = 0;
+    unsigned char byte;
 
     //Auxiliary variables
     int rec_a;
@@ -405,14 +410,14 @@ int llread(int fd, unsigned char * buffer)
                 case READING_DATA:
                     if (byte == ESC) state = DATA_FOUND_ESC;
                     else if (byte = FLAG) { //If the byte is a FLAG, it means that the data has ended
-                        rec_bcc2 = buffer[data_position-1]; //Stores the recieved BCC2
+                        rec_bcc2 = packet[data_position-1]; //Stores the recieved BCC2
                         
-                        buffer[data_position-1] = '\0'; //Ends the recieved data string
+                        packet[data_position-1] = '\0'; //Ends the recieved data string
 
                         
-                        data_check = buffer[0]; //Stores the first byte of the data
+                        data_check = packet[0]; //Stores the first byte of the data
 
-                        for (int j = 1; j < data_position-1; j++) data_check ^= buffer[j]; //XORs all the bytes of the data to check if the BCC2 is correct
+                        for (int j = 1; j < data_position-1; j++) data_check ^= packet[j]; //XORs all the bytes of the data to check if the BCC2 is correct
 
 
                         if (data_check == rec_bcc2) { //If the BCC2 is correct, send RR[0/1] to the transmitter
@@ -451,17 +456,17 @@ int llread(int fd, unsigned char * buffer)
                         }
                     }
                     else {
-                        buffer[data_position] = byte;
+                        packet[data_position] = byte;
                         data_position++;
                     }
                     break;
                 case DATA_FOUND_ESC:
                     if (byte == F_ESC) {
-                        buffer[data_position] = FLAG;
+                        packet[data_position] = FLAG;
                         data_position++;
                     }
                     else if (byte == E_ESC) {
-                        buffer[data_position] = ESC;
+                        packet[data_position] = ESC;
                         data_position++;
                     }
                     state = READING_DATA; //Not sure se n falta aqui uma condiçao
@@ -480,13 +485,18 @@ int llread(int fd, unsigned char * buffer)
 ////////////////////////////////////////////////
 int llclose(int fd)
 {
+    printf("Called llclose()\n");
     LinkLayerState state;
     unsigned char byte[5] = {0};
-    unsigned char byte[1];
-    int retransmissions;
+    int nretransmissions = retransmissions;
+    
+    if(role) printf("Transmitter\n");
+    else if (!role) printf("Reciever\n");
 
     //Transmitter role
-    if (!connectionParameters.role){
+    if (role){
+
+        printf("In trasmitter role\n");
 
         state = START;
 
@@ -500,40 +510,38 @@ int llclose(int fd)
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
 
-        retransmissions=connectionParameters.nRetransmissions;
-
-        while ( retransmissions!= 0 && state != STOP_R) {
+        while (nretransmissions!= 0 && state != STOP_R) {
                     
             // Send Transmitter DISC
             int bytes = write(fd, byte, 5);
                     printf("Transmitter DISC sent\n");
                     printf("Bytes written: %d\n", bytes);
 
-            alarm(connectionParameters.timeout);
+            alarm(timeout);
             alarmEnabled = FALSE;
                     
             while (alarmEnabled == FALSE && state != STOP_R) {
                 if (read(fd, &byte, 1) > 0) {
                     switch (state) {
                         case START:
-                            if (byte == FLAG) state = FLAG_RCV;
+                            if (byte[0] == FLAG) state = FLAG_RCV;
                             break;
                         case FLAG_RCV:
-                            if (byte == REC_ADR) state = A_RCV;
-                            else if (byte != FLAG) state = START;
+                            if (byte[0] == REC_ADR) state = A_RCV;
+                            else if (byte[0] != FLAG) state = START;
                             break;
                         case A_RCV:
-                            if (byte == DISC) state = C_RCV;
-                            else if (byte == FLAG) state = FLAG_RCV;
+                            if (byte[0] == DISC) state = C_RCV;
+                            else if (byte[0] == FLAG) state = FLAG_RCV;
                             else state = START;
                             break;
                         case C_RCV:
-                            if (byte == (REC_ADR ^ DISC)) state = BCC1_OK;
-                            else if (byte == FLAG) state = FLAG_RCV;
+                            if (byte[0] == (REC_ADR ^ DISC)) state = BCC1_OK;
+                            else if (byte[0] == FLAG) state = FLAG_RCV;
                             else state = START;
                             break;
                         case BCC1_OK:
-                            if (byte == FLAG) state = STOP_R;
+                            if (byte[0] == FLAG) state = STOP_R;
                             else state = START;
                             printf("Receiver DISC received successfully\n");
                             break;
@@ -542,7 +550,7 @@ int llclose(int fd)
                     }
                 }
             } 
-            retransmissions--;
+            nretransmissions--;
         }
 
         if (state != STOP_R) return -1;
@@ -561,7 +569,9 @@ int llclose(int fd)
     }
 
     //Receiver role
-    if (connectionParameters.role){
+    if (!role){
+
+        printf("In reciever role\n");
 
         state = START;
 
@@ -575,35 +585,38 @@ int llclose(int fd)
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
 
-        retransmissions=connectionParameters.nRetransmissions;
+        while (nretransmissions!= 0 && state != STOP_R) {
 
-        while ( retransmissions!= 0 && state != STOP_R) {
-
-            alarm(connectionParameters.timeout);
+            alarm(timeout);
             alarmEnabled = FALSE;
                     
             while (alarmEnabled == FALSE && state != STOP_R) {
                 if (read(fd, &byte, 1) > 0) {
                     switch (state) {
                         case START:
-                            if (byte == FLAG) state = FLAG_RCV;
+                            printf("DISC connection started\n");
+                            if (byte[0] == FLAG) state = FLAG_RCV;
                             break;
                         case FLAG_RCV:
-                            if (byte == TT_ADR) state = A_RCV;
-                            else if (byte != FLAG) state = START;
+                            printf("FLAG recieved\n");
+                            if (byte[0] == TT_ADR) state = A_RCV;
+                            else if (byte[0] != FLAG) state = START;
                             break;
                         case A_RCV:
-                            if (byte == DISC) state = C_RCV;
-                            else if (byte == FLAG) state = FLAG_RCV;
+                            printf("A recieved\n");
+                            if (byte[0] == DISC) state = C_RCV;
+                            else if (byte[0] == FLAG) state = FLAG_RCV;
                             else state = START;
                             break;
                         case C_RCV:
-                            if (byte == (TT_ADR ^ DISC)) state = BCC1_OK;
-                            else if (byte == FLAG) state = FLAG_RCV;
+                            printf("C recieved\n");
+                            if (byte[0] == (TT_ADR ^ DISC)) state = BCC1_OK;
+                            else if (byte[0] == FLAG) state = FLAG_RCV;
                             else state = START;
                             break;
                         case BCC1_OK:
-                            if (byte == FLAG) state = STOP_R;
+                            printf("BCC1 ok\n");
+                            if (byte[0] == FLAG) state = STOP_R;
                             else state = START;
                             printf("Transmitter DISC received successfully\n");
                             break;
@@ -612,7 +625,7 @@ int llclose(int fd)
                     }
                 }
             } 
-            retransmissions--;
+            nretransmissions--;
         }
          
         if (state != STOP_R) return -1;
@@ -628,11 +641,10 @@ int llclose(int fd)
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
 
-        retransmissions=connectionParameters.nRetransmissions;
 
-        while ( retransmitions!= 0 && state != STOP_R) {
+        while (nretransmissions!= 0 && state != STOP_R) {
 
-            alarm(connectionParameters.timeout);
+            alarm(timeout);
             alarmEnabled = FALSE;
                     
             while (alarmEnabled == FALSE && state != STOP_R) {
@@ -665,7 +677,7 @@ int llclose(int fd)
                     }
                 }
             } 
-            retransmissions--;
+            nretransmissions--;
         }
     
     if (state != STOP_R) return -1;
@@ -681,6 +693,7 @@ int llclose(int fd)
     return close(fd);
 
 }
+
 
 int main(int argc, char *argv[]){
     if (argc < 3)
@@ -698,9 +711,9 @@ int main(int argc, char *argv[]){
     LinkLayer linkLayer;
     sprintf(linkLayer.serialPort, "%s", serialPort);
 
-    if (individual)
+    if (!individual)
         linkLayer.role = LlTx;
-    else if (!individual)
+    else if (individual)
         linkLayer.role = LlRx;
     else
     {
@@ -709,7 +722,7 @@ int main(int argc, char *argv[]){
     }
 
     llopen(linkLayer);
-
+    printf("After llopen()\n");
     //llwrite(...);
 
     llclose(fd);
