@@ -255,7 +255,7 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
-int llwrite(const unsigned char *byte, int bufSize)
+int llwrite(const unsigned char *buf, int bufSize)
 {
     unsigned char tramaTx = 0;
     int frameSize = 6+bufSize;
@@ -272,17 +272,17 @@ int llwrite(const unsigned char *byte, int bufSize)
     
     frame[3] = frame[1] ^ frame[2];
     
-    memcpy(frame+4,byte, bufSize);
-    unsigned char BCC2 = byte[0];
-    for (unsigned int i = 1 ; i < bufSize ; i++) BCC2 ^= byte[i];
+    memcpy(frame+4, buf, bufSize);
+    unsigned char BCC2 = buf[0];
+    for (unsigned int i = 1 ; i < bufSize ; i++) BCC2 ^= buf[i];
 
     int j = 4;
     for (unsigned int i = 0 ; i < bufSize ; i++) {
-        if(byte[i] == FLAG || byte[i] == ESC) {
+        if(buf[i] == FLAG || buf[i] == ESC) {
             frame = realloc(frame,++frameSize);
             frame[j++] = ESC;
         }
-        frame[j++] = byte[i];
+        frame[j++] = buf[i];
     }
     frame[j++] = BCC2;
     frame[j++] = FLAG;
@@ -300,7 +300,8 @@ int llwrite(const unsigned char *byte, int bufSize)
         while (alarmEnabled == FALSE && !rejected && !ready) {
 
             write(fd, frame, j);
-            unsigned char byte, C = 0;
+            unsigned char byte=0;
+            unsigned char C = 0;
             LinkLayerState state = START;
             
             while (state != STOP_R && alarmEnabled == FALSE) {  
@@ -370,7 +371,7 @@ int llread(unsigned char * packet)
     LinkLayerState state = START;
 
     unsigned char writeBuffer[6] = {0}; // 5 bytes for information feedback plus 1 byte for the '\0' character
-    unsigned char byte;
+    unsigned char byte[5]={0};
 
     //Auxiliary variables
     int rec_a;
@@ -385,31 +386,31 @@ int llread(unsigned char * packet)
         if (read(fd, &byte, 1) > 0) {
             switch (state) {
                 case START:
-                    if (byte == FLAG) state = FLAG_RCV;
+                    if (byte[0] == FLAG) state = FLAG_RCV;
                     break;
                 case FLAG_RCV:
-                    if (byte == TT_ADR){
+                    if (byte[0] == TT_ADR){
                         state = A_RCV;
-                        rec_a = byte;
+                        rec_a = byte[0];
                     }
-                    else if (byte != FLAG) state = START;
+                    else if (byte[0] != FLAG) state = START;
                     break;
                 case A_RCV:
-                    if (byte == INF0 || byte == INF1){
+                    if (byte[0] == INF0 || byte[0] == INF1){
                         state = C_RCV;
-                        rec_c = byte; 
+                        rec_c = byte[0]; 
                     }
-                    else if (byte == FLAG) state = FLAG_RCV;
+                    else if (byte[0] == FLAG) state = FLAG_RCV;
                     else state = START;
                     break;
                 case C_RCV:
-                    if (byte == (rec_a ^ rec_c)) state = READING_DATA;
-                    else if (byte == FLAG) state = FLAG_RCV;
+                    if (byte[0] == (rec_a ^ rec_c)) state = READING_DATA;
+                    else if (byte[0] == FLAG) state = FLAG_RCV;
                     else state = START;
                     break;
                 case READING_DATA:
-                    if (byte == ESC) state = DATA_FOUND_ESC;
-                    else if (byte = FLAG) { //If the byte is a FLAG, it means that the data has ended
+                    if (byte[0] == ESC) state = DATA_FOUND_ESC;
+                    else if (byte[0] == FLAG) { //If the byte is a FLAG, it means that the data has ended
                         rec_bcc2 = packet[data_position-1]; //Stores the recieved BCC2
                         
                         packet[data_position-1] = '\0'; //Ends the recieved data string
@@ -456,16 +457,16 @@ int llread(unsigned char * packet)
                         }
                     }
                     else {
-                        packet[data_position] = byte;
+                        packet[data_position] = byte[0];
                         data_position++;
                     }
                     break;
                 case DATA_FOUND_ESC:
-                    if (byte == F_ESC) {
+                    if (byte[0] == F_ESC) {
                         packet[data_position] = FLAG;
                         data_position++;
                     }
-                    else if (byte == E_ESC) {
+                    else if (byte[0] == E_ESC) {
                         packet[data_position] = ESC;
                         data_position++;
                     }
@@ -694,7 +695,7 @@ int llclose(int fd)
 
 }
 
-
+/*
 int main(int argc, char *argv[]){
     if (argc < 3)
     {
@@ -729,3 +730,4 @@ int main(int argc, char *argv[]){
 
     return 0;
 }
+*/

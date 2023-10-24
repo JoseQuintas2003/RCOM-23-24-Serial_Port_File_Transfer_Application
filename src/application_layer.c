@@ -16,18 +16,18 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     
     LinkLayer linkLayer;
     strcpy(linkLayer.serialPort,serialPort);
-    if(role=="tx") linkLayer.role = LlRx;
-    else linkLayer.role = LlTx;
+    if(strcmp(role, "tx")) linkLayer.role = LlTx;
+    else linkLayer.role = LlRx;
     linkLayer.baudRate = baudRate;
     linkLayer.nRetransmissions = nTries;
     linkLayer.timeout = timeout;
     unsigned char *packet;
-
+    
     int fd =  llopen(linkLayer);
     if (fd < 0)
     {
         perror("llopen error\n");
-        return -1;
+        exit(-1);
     }
 
     switch (linkLayer.role) {
@@ -36,7 +36,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         FILE *file = fopen(filename, "rb");
         if (file == NULL) {
             perror("File not found\n");
-            return -1;
+            exit(-1);
         }
 
         struct stat st;
@@ -46,9 +46,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         } 
         else {
             perror("Error getting file size");
-            return -1;
+            exit(-1);
         }
-
+    
         unsigned int ControlPacketSize;
         unsigned char *ControlPacketStart = (unsigned char *)malloc(MAX_PAYLOAD_SIZE);
         // 2 – start
@@ -71,8 +71,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
         if (llwrite(ControlPacketStart, ControlPacketSize) == -1)
         {
-            printf("Exit: error in start packet\n");
-            return -1;
+            perror("Exit: error in start packet\n");
+            exit(-1);
         }
 
         unsigned char sequence = 0;
@@ -91,10 +91,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             packet[3] = dataSize & 0xFF;
             memcpy(packet + 4, data, dataSize);
 
-            if (llwrite(fd, packet) == -1)
+            if (llwrite(packet, packetSize) == -1)
             {
-                printf("error in data packets\n");
-                return -1;
+                perror("error in data packets\n");
+                exit(-1);
             }
 
             bytesLeft -= (long int)MAX_PAYLOAD_SIZE;
@@ -120,10 +120,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
         memcpy(controlPacketEnd + 5 + controlPacketEnd[2], filename, strlen(filename));
 
-        if (llwrite(fd, controlPacketEnd) == -1)
+        if (llwrite(controlPacketEnd, ControlPacketSize) == -1)
         {
             printf("Exit: error in end packet\n");
-            return -1;
+            exit(-1);
         }
 
         llclose(fd);
@@ -131,6 +131,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     }
 
     case LlRx: {
+        
         while (1)
         {
             while (llread(packet) < 0){

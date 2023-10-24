@@ -41,6 +41,6 @@ int main(int argc, char *argv[])
            filename);
 
     applicationLayer(serialPort, role, BAUDRATE, N_TRIES, TIMEOUT, filename);
-
+    
     return 0;
 }
