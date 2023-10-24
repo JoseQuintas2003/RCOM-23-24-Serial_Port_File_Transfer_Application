@@ -651,24 +651,24 @@ int llclose(int fd)
                 if (read(fd, &byte, 1) > 0) {
                     switch (state) {
                         case START:
-                            if (byte == FLAG) state = FLAG_RCV;
+                            if (byte[0] == FLAG) state = FLAG_RCV;
                             break;
                         case FLAG_RCV:
-                            if (byte == TT_ADR) state = A_RCV;
-                            else if (byte != FLAG) state = START;
+                            if (byte[0] == TT_ADR) state = A_RCV;
+                            else if (byte[0] != FLAG) state = START;
                             break;
                         case A_RCV:
-                            if (byte == UA) state = C_RCV;
-                            else if (byte == FLAG) state = FLAG_RCV;
+                            if (byte[0] == UA) state = C_RCV;
+                            else if (byte[0] == FLAG) state = FLAG_RCV;
                             else state = START;
                             break;
                         case C_RCV:
-                            if (byte == (TT_ADR ^ UA)) state = BCC1_OK;
-                            else if (byte == FLAG) state = FLAG_RCV;
+                            if (byte[0] == (TT_ADR ^ UA)) state = BCC1_OK;
+                            else if (byte[0] == FLAG) state = FLAG_RCV;
                             else state = START;
                             break;
                         case BCC1_OK:
-                            if (byte == FLAG) state = STOP_R;
+                            if (byte[0] == FLAG) state = STOP_R;
                             else state = START;
                             printf("UA received successfully\n");
                             break;
