@@ -63,10 +63,10 @@ int llopen(LinkLayer connectionParameters)
     // Program usage: Uses either COM1 or COM2
     const char *serialPortName = connectionParameters.serialPort;
 
-    fd = open(connectionParameters.serialPort, O_RDWR | O_NOCTTY);
+    fd = open(serialPortName, O_RDWR | O_NOCTTY);
     if (fd < 0)
     {
-        perror(connectionParameters.serialPort);
+        perror(serialPortName);
         return -1;
     }
 
@@ -267,7 +267,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         printf("Memory allocation error");
     }
     frame[0] = FLAG;
-    frame[1] = REC_ADR;
+    frame[1] = TT_ADR;
 
     if (tramaTx) frame[2] = INF1; 
     else frame[2] = INF0;
@@ -301,7 +301,8 @@ int llwrite(const unsigned char *buf, int bufSize)
 
         while (alarmEnabled == FALSE && !rejected && !ready) {
 
-            write(fd, frame, j);
+            int bytes_written = write(fd, frame, j);
+            printf("Bytes written: %d\n", bytes_written);
             unsigned char byte=0;
             unsigned char C = 0;
             LinkLayerState state = START;
@@ -389,12 +390,16 @@ int llread(unsigned char * packet)
         if (read(fd, &byte, 1) > 0) {
             switch (state) {
                 case START:
-                    if (byte[0] == FLAG) state = FLAG_RCV;
+                    if (byte[0] == FLAG){
+                        state = FLAG_RCV; 
+                        printf("FLAG received\n");
+                    } 
                     break;
                 case FLAG_RCV:
                     if (byte[0] == TT_ADR){
                         state = A_RCV;
                         rec_a = byte[0];
+                        printf("Transmitter address received\n");
                     }
                     else if (byte[0] != FLAG) state = START;
                     break;
@@ -402,18 +407,27 @@ int llread(unsigned char * packet)
                     if (byte[0] == INF0 || byte[0] == INF1){
                         state = C_RCV;
                         rec_c = byte[0]; 
+                        printf("Control field received\n");
                     }
                     else if (byte[0] == FLAG) state = FLAG_RCV;
+                    //else if (byte[0] == DISC) state = DISCONNECTED;
                     else state = START;
                     break;
                 case C_RCV:
-                    if (byte[0] == (rec_a ^ rec_c)) state = READING_DATA;
+                    if (byte[0] == (rec_a ^ rec_c)){
+                        state = READING_DATA; 
+                        printf("BCC1 received\n");
+                    } 
                     else if (byte[0] == FLAG) state = FLAG_RCV;
                     else state = START;
                     break;
                 case READING_DATA:
-                    if (byte[0] == ESC) state = DATA_FOUND_ESC;
+                    if (byte[0] == ESC) {
+                        state = DATA_FOUND_ESC;
+                        printf("ESC received\n");
+                    }
                     else if (byte[0] == FLAG) { //If the byte is a FLAG, it means that the data has ended
+                        printf("Ending FLAG received\n");
                         rec_bcc2 = packet[data_position-1]; //Stores the recieved BCC2
                         
                         packet[data_position-1] = '\0'; //Ends the recieved data string
@@ -462,6 +476,7 @@ int llread(unsigned char * packet)
                     else {
                         packet[data_position] = byte[0];
                         data_position++;
+                        printf("Data byte received\n");
                     }
                     break;
                 case DATA_FOUND_ESC:
@@ -475,6 +490,22 @@ int llread(unsigned char * packet)
                     }
                     state = READING_DATA; //Not sure se n falta aqui uma condiçao
                     break;
+                /*
+                case DISCONNECTED:
+                    printf("Transmitter DISC received\n");
+                    if (byte[0] == (rec_a ^ rec_c)){ 
+                        printf("BCC1 received\n");
+
+                        writeBuffer[0] = FLAG;
+                        writeBuffer[1] = REC_ADR;
+                        writeBuffer[2] = DISC;
+                        writeBuffer[3] = writeBuffer[1] ^ writeBuffer[2];
+                        writeBuffer[4] = FLAG;
+                        writeBuffer[5] = '\0';
+                        int bytes = write(fd, writeBuffer, 5);
+                        printf("Receiver DISC sent with %d\n", bytes);
+                    } 
+                */
                 default: 
                     break;
             }
@@ -494,11 +525,11 @@ int llclose(int fd)
     unsigned char byte[5] = {0};
     int nretransmissions = retransmissions;
     
-    if(role) printf("Transmitter\n");
-    else if (!role) printf("Reciever\n");
+    if(!role) printf("Transmitter\n");
+    else if (role) printf("Reciever\n");
 
     //Transmitter role
-    if (role){
+    if (!role){
 
         printf("In trasmitter role\n");
 
@@ -573,7 +604,7 @@ int llclose(int fd)
     }
 
     //Receiver role
-    if (!role){
+    if (role){
 
         printf("In reciever role\n");
 
@@ -684,7 +715,7 @@ int llclose(int fd)
             nretransmissions--;
         }
     
-    if (state != STOP_R) return -1;
+        if (state != STOP_R) return -1;
 
     }
 
