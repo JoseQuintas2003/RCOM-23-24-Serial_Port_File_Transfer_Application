@@ -16,7 +16,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     
     LinkLayer linkLayer;
     strcpy(linkLayer.serialPort,serialPort);
-    if(strcmp(role, "tx")) linkLayer.role = LlTx;
+    if(!strcmp(role, "tx")) linkLayer.role = LlTx;
     else linkLayer.role = LlRx;
     linkLayer.baudRate = baudRate;
     linkLayer.nRetransmissions = nTries;
@@ -32,6 +32,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
     switch (linkLayer.role) {
     case LlTx: {
+        printf("Application layer TX\n"); //Apagar depois
         
         FILE *file = fopen(filename, "rb");
         if (file == NULL) {
@@ -131,6 +132,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     }
 
     case LlRx: {
+        printf("Application layer RX\n"); //Apagar depois
         
         while (1)
         {

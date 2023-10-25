@@ -105,7 +105,7 @@ int llopen(LinkLayer connectionParameters)
     role = connectionParameters.role;
 
     //Transmitter role
-    if (connectionParameters.role){
+    if (!role){
         state = START;
 
         // Set alarm function handler
@@ -166,8 +166,9 @@ int llopen(LinkLayer connectionParameters)
                         state = STOP_R;
                         printf("UA received successfully\n");
                     }
-                    else
+                    else {
                         state = START;
+                    }
                     break;
                 default:
                     break;
@@ -177,7 +178,7 @@ int llopen(LinkLayer connectionParameters)
     }
 
     //Receiver role
-    if (!connectionParameters.role){
+    if (role){
         state = START;
 
         // Create UA packet
@@ -248,7 +249,7 @@ int llopen(LinkLayer connectionParameters)
         printf("Bytes written: %d\n", bytes);
     }
 
-    
+    printf("Connection established successfully\n");
     return fd;
 }
 
@@ -257,6 +258,7 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
+    printf("Called llwrite()\n");
     unsigned char tramaTx = 0;
     int frameSize = 6+bufSize;
     unsigned char *frame = (unsigned char *) malloc(frameSize);
@@ -368,6 +370,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char * packet)
 {
+    printf("Called llread()\n");
     LinkLayerState state = START;
 
     unsigned char writeBuffer[6] = {0}; // 5 bytes for information feedback plus 1 byte for the '\0' character
