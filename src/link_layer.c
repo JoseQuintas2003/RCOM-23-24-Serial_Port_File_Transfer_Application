@@ -265,7 +265,6 @@ int llwrite(const unsigned char *buf, int bufSize)
     unsigned char *frame = (unsigned char *) malloc(frameSize);
     if (frame == NULL) {
         // Memory allocation failed
-        printf("Memory allocation error. Requested size: %d\n", frameSize);
         perror("Memory allocation error");
         exit(-1);
     }
@@ -310,8 +309,9 @@ int llwrite(const unsigned char *buf, int bufSize)
             unsigned char byte=0;
             unsigned char C = 0;
             LinkLayerState state = START;
-            
-            while (state != STOP_R && alarmEnabled == FALSE) {  
+             
+            while (state != STOP_R && alarmEnabled == FALSE) {   
+                
                 if (read(fd, &byte, 1) > 0) {
                     switch (state) {
                         case START:
@@ -359,7 +359,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         if (ready) break;
         numTries++;
     }
-    
+       
     free(frame);
     if(ready) return frameSize;
     else{
@@ -545,10 +545,10 @@ int llclose(int fd)
         byte[2] = DISC;
         byte[3] = byte[1] ^ byte[2];
         byte[4] = FLAG;
-
+        
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
-
+        
         while (nretransmissions!= 0 && state != STOP_R) {
                     
             // Send Transmitter DISC
@@ -558,9 +558,9 @@ int llclose(int fd)
 
             alarm(timeout);
             alarmEnabled = FALSE;
-                    
+
             while (alarmEnabled == FALSE && state != STOP_R) {
-                if (read(fd, &byte, 1) > 0) {
+                    if (read(fd, byte, 1) > 0) {
                     switch (state) {
                         case START:
                             if (byte[0] == FLAG) state = FLAG_RCV;
@@ -591,7 +591,7 @@ int llclose(int fd)
             } 
             nretransmissions--;
         }
-
+        
         if (state != STOP_R) return -1;
 
         // Create UA packet
@@ -613,6 +613,7 @@ int llclose(int fd)
         printf("In reciever role\n");
 
         state = START;
+        nretransmissions = retransmissions;
 
         // Create DISC packet
         byte[0] = FLAG;
@@ -623,9 +624,9 @@ int llclose(int fd)
 
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
-
+        
         while (nretransmissions!= 0 && state != STOP_R) {
-
+             
             alarm(timeout);
             alarmEnabled = FALSE;
                     
@@ -666,7 +667,7 @@ int llclose(int fd)
             } 
             nretransmissions--;
         }
-         
+        
         if (state != STOP_R) return -1;
 
         // Send Receiver DISC
@@ -676,6 +677,7 @@ int llclose(int fd)
 
         // Reset state for UA reception
         state = START;
+        nretransmissions = retransmissions;
 
         // Set alarm function handler
         (void)signal(SIGALRM, alarmHandler);
@@ -685,7 +687,7 @@ int llclose(int fd)
 
             alarm(timeout);
             alarmEnabled = FALSE;
-                    
+            
             while (alarmEnabled == FALSE && state != STOP_R) {
                 if (read(fd, &byte, 1) > 0) {
                     switch (state) {

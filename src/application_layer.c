@@ -8,7 +8,11 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+//#include <math.h>
 
+#define RX_START 0x02
+#define RX_DATA 0x01
+#define RX_END 0x03
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
                       int nTries, int timeout, const char *filename)
@@ -23,7 +27,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     linkLayer.timeout = timeout;
     unsigned char* packet;
     
-    int fd =  llopen(linkLayer);
+    int fd = llopen(linkLayer);
     if (fd < 0)
     {
         perror("llopen error\n");
@@ -61,11 +65,16 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         ControlPacketStart[1] = 0;
         ControlPacketStart[2] = 4;
 
-        for (unsigned char i = 0; i < ControlPacketStart[2]; i++)
-        {
-            ControlPacketStart[2 + ControlPacketStart[2] - i] = fileSize & 0xFF;
-            fileSize >>= 8;
-        }
+        // Encoding file size
+        unsigned char len4 = fileSize / (256 * 256 * 256);
+        unsigned char len3 = (fileSize % (256 * 256 * 256)) / (256 * 256);
+        unsigned char len2 = (fileSize % (256 * 256)) / 256;
+        unsigned char len1 = fileSize % 256;
+
+        ControlPacketStart[3] = len1;
+        ControlPacketStart[4] = len2;
+        ControlPacketStart[5] = len3;
+        ControlPacketStart[6] = len4;
 
         // 1 – nome do ficheiro
         ControlPacketStart[3 + ControlPacketStart[2]] = 1;
@@ -82,9 +91,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
         if (llwrite(ControlPacketStart, ControlPacketSize) == -1)
         {
-            perror("Exit: error in start packet\n");
+            perror("Error in start packet\n");
             exit(-1);
         }
+        printf("Start Control Packet sent\n");
 
         unsigned char sequence = 0;
         long int bytesLeft = fileSize;
@@ -95,8 +105,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             unsigned char *data = (unsigned char *)malloc(dataSize);
             fread(data, sizeof(unsigned char), dataSize, file);
 
-            int *packetSize = 1 + 1 + 2 + dataSize;
-            unsigned char* packet = (unsigned char*)malloc(*packetSize);
+            int packetSize = 1 + 1 + 2 + dataSize;
             packet[0] = 1;
             packet[1] = sequence;
             packet[2] = dataSize >> 8 & 0xFF;
@@ -105,13 +114,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
             if (llwrite(packet, packetSize) == -1)
             {
-                perror("error in data packets\n");
+                perror("Error in data packets\n");
                 exit(-1);
             }
 
             bytesLeft -= (long int)MAX_PAYLOAD_SIZE;
             sequence = (sequence + 1) % 255;
         }
+        printf("Data packets sent\n");
 
         unsigned char *controlPacketEnd = (unsigned char *)malloc(MAX_PAYLOAD_SIZE);
         // 3 – end
@@ -120,87 +130,121 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         controlPacketEnd[1] = 0;
         controlPacketEnd[2] = (fileSize + 7) / 8;
 
-        for (unsigned char i = 0; i < controlPacketEnd[2]; i++)
-        {
-            controlPacketEnd[2 + controlPacketEnd[2] - i] = fileSize & 0xFF;
-            fileSize >>= 8;
-        }
+        controlPacketEnd[3] = len1;
+        controlPacketEnd[4] = len2;
+        controlPacketEnd[5] = len3;
+        controlPacketEnd[6] = len4;
 
         // 1 – nome do ficheiro
         controlPacketEnd[3 + controlPacketEnd[2]] = 1;
         controlPacketEnd[4 + controlPacketEnd[2]] = strlen(filename);
 
-        memcpy(controlPacketEnd + 5 + controlPacketEnd[2], filename, strlen(filename));
+        //memcpy(controlPacketEnd + 5 + controlPacketEnd[2], filename, strlen(filename));
+
+        for (int i = 0; i < strlen(filename); i++)
+        {
+            controlPacketEnd[5 + controlPacketEnd[2] + i] = filename[i];
+        }
 
         if (llwrite(controlPacketEnd, ControlPacketSize) == -1)
         {
-            printf("Exit: error in end packet\n");
+            perror("Error in end packet\n");
             exit(-1);
         }
+        printf("End Control Packet sent\n");
 
         free(packet);
         break;
     }
     
     case LlRx: {
-    packet = malloc(65535);
-
-    printf("Application layer RX\n"); //Apagar depois
         
-    while (1)
-    {
-        while (llread(packet) < 0){
-            
-            if (packet[0] == 2)
+        FILE *file;
+        packet = malloc(256);
+        long int fileSize = 0;
+        int state = RX_START;
+
+        while (state != RX_END){
+            printf("Waiting for packet\n");
+            if (llread(packet) == -1)
             {
-                long int rxFileSize = 0;
-                unsigned char *name = (unsigned char *)malloc(packet[4 + packet[3]]);
-
-                for (unsigned char i = 0; i < packet[3]; i++)
-                {
-                    rxFileSize |= (packet[3 + 2 + i] << (8 * i));
-                }
-
-                memcpy(name, packet + 5 + packet[3], packet[4 + packet[3]]);
-
-                FILE *newFile = fopen((char *)name, "wb+");
-                while (1)
-                {
-                    while (llread(packet) < 0)
-                        ;
-                    if (packet[0] != 3)
-                    {
-                        unsigned char *buffer = (unsigned char *)malloc(packet[3]);
-                        memcpy(buffer, packet + 4, packet[3]);
-                        fwrite(buffer, sizeof(unsigned char), packet[3], newFile);
-                        free(buffer);
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                fclose(newFile);
-                break;
+                perror("An error occured while reading packet\n");
+                exit(-1);
             }
+
+            switch (state){
+                case RX_START:
+                    printf("Packet received\n");
+                    if (packet[0] == 2){
+                        state = RX_DATA;
+                        unsigned char filename[packet[4 + packet[2]] + 1];
+
+                        if (packet[1] == 0) {
+                            for (int i = 0; i < packet[2]; i++) {
+                                fileSize += packet[3 + i] * pow(256,1);
+                            }
+                            printf("File size: %ld\n", fileSize);
+                        }
+
+                        if (packet[7] == 1) {
+                            for (int i = 0; i < packet[8]; i++) {
+                                filename[i] = packet[9 + i];
+                            }
+                            filename[packet[8]] = '\0';
+                        }
+                        printf("File name: %s\n", filename);
+
+                        file = fopen((char *)filename, "wb");
+
+                        if (file == NULL) {
+                            perror("Error opening file\n");
+                            exit(-1);
+                        }
+
+                        packet = malloc(fileSize + 4);
+                    }
+                    break;
+                case RX_DATA:
+                    if (packet[0] == 1) {
+                        fwrite(packet + 4, sizeof(unsigned char), packet[2] * 256 + packet[3], file);
+                    }
+                    else if (packet[0] == 3) {
+                        state = RX_END;
+                        int fileSize2 = 0;
+                        for (int i = 0; i < packet[2]; i++) {
+                            fileSize2 += packet[3 + i] * pow(256,i);
+                        }
+                        if (fileSize != fileSize2) {
+                            perror("Error: file size doesn't match\n");
+                            exit(-1);
+                        }
+                        printf("File received successfully\n");
+                        printf("File size: %ld\n", fileSize);
+                        printf("File name: %s\n", filename);
+                    }
+                    break;
+                }
+            }
+            
+            fclose(file);
+            free(packet);
         }
     }
-
-    break;
-    }
     
-    default:
-        exit(-1);
-        break;
-    }
-
-    
-    if (llclose(0) == -1)
+    if (llclose(fd) == -1)
     {
         perror("Error closing connection\n");
         exit(-1);
     }
 
     printf("Connection closed\n");
+}
+
+int pow(int base, int exponent) {
+    int result = 1;
+    while (exponent > 0) {
+        result *= base;
+        exponent--;
+    }
+    return result;
 }
