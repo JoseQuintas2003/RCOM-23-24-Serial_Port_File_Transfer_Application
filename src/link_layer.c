@@ -262,7 +262,7 @@ int llwrite(const unsigned char *buf, int bufSize)
     unsigned char tramaTx = 0;
     int frameSize = 6+bufSize;
     printf("framesize: %d\n", frameSize);
-    unsigned char *frame = (unsigned char *) malloc(frameSize);
+    unsigned char *frame = (unsigned char *) malloc(2*frameSize);
     if (frame == NULL) {
         // Memory allocation failed
         perror("Memory allocation error");
@@ -284,10 +284,11 @@ int llwrite(const unsigned char *buf, int bufSize)
     int j = 4;
     for (unsigned int i = 0 ; i < bufSize ; i++) {
         if(buf[i] == FLAG || buf[i] == ESC) {
-            frame = realloc(frame,++frameSize);
             frame[j++] = ESC;
+            if(buf[i] == FLAG) frame[j++] = F_ESC;
+            else frame[j++] = E_ESC;        
         }
-        frame[j++] = buf[i];
+        else frame[j++] = buf[i];
     }
     frame[j++] = BCC2;
     frame[j++] = FLAG;
@@ -396,14 +397,12 @@ int llread(unsigned char * packet)
                 case START:
                     if (byte[0] == FLAG){
                         state = FLAG_RCV; 
-                        printf("FLAG received\n");
                     } 
                     break;
                 case FLAG_RCV:
                     if (byte[0] == TT_ADR){
                         state = A_RCV;
                         rec_a = byte[0];
-                        printf("Transmitter address received\n");
                     }
                     else if (byte[0] != FLAG) state = START;
                     break;
@@ -411,7 +410,6 @@ int llread(unsigned char * packet)
                     if (byte[0] == INF0 || byte[0] == INF1){
                         state = C_RCV;
                         rec_c = byte[0]; 
-                        printf("Control field received\n");
                     }
                     else if (byte[0] == FLAG) state = FLAG_RCV;
                     //else if (byte[0] == DISC) state = DISCONNECTED;
@@ -420,7 +418,6 @@ int llread(unsigned char * packet)
                 case C_RCV:
                     if (byte[0] == (rec_a ^ rec_c)){
                         state = READING_DATA; 
-                        printf("BCC1 received\n");
                     } 
                     else if (byte[0] == FLAG) state = FLAG_RCV;
                     else state = START;
@@ -428,19 +425,18 @@ int llread(unsigned char * packet)
                 case READING_DATA:
                     if (byte[0] == ESC) {
                         state = DATA_FOUND_ESC;
-                        printf("ESC received\n");
                     }
                     else if (byte[0] == FLAG) { //If the byte is a FLAG, it means that the data has ended
-                        printf("Ending FLAG received\n");
-                        rec_bcc2 = packet[data_position-1]; //Stores the recieved BCC2
+                        rec_bcc2 = packet[data_position-1]; //Stores the received BCC2
                         
-                        packet[data_position-1] = '\0'; //Ends the recieved data string
+                        packet[data_position-1] = '\0'; //Ends the received data string
 
                         
                         data_check = packet[0]; //Stores the first byte of the data
 
                         for (int j = 1; j < data_position-1; j++) data_check ^= packet[j]; //XORs all the bytes of the data to check if the BCC2 is correct
 
+                        printf("Received bcc: %x\nCalculated bcc: %x.\n", rec_bcc2, data_check);
 
                         if (data_check == rec_bcc2) { //If the BCC2 is correct, send RR[0/1] to the transmitter
                             writeBuffer[0] = FLAG;
@@ -454,7 +450,7 @@ int llread(unsigned char * packet)
                             writeBuffer[5] = '\0';
                             write(fd, writeBuffer, 5);
 
-                            printf("Data received successfully.\n Recieved data with %d bytes \n", data_position);
+                            printf("Data received successfully.\nReceived data with %d bytes \n", data_position);
 
                             state = STOP_R;
 
@@ -478,19 +474,15 @@ int llread(unsigned char * packet)
                         }
                     }
                     else {
-                        packet[data_position] = byte[0];
-                        data_position++;
-                        printf("Data byte received\n");
+                        packet[data_position++] = byte[0];
                     }
                     break;
                 case DATA_FOUND_ESC:
                     if (byte[0] == F_ESC) {
-                        packet[data_position] = FLAG;
-                        data_position++;
+                        packet[data_position++] = FLAG;
                     }
                     else if (byte[0] == E_ESC) {
-                        packet[data_position] = ESC;
-                        data_position++;
+                        packet[data_position++] = ESC;
                     }
                     state = READING_DATA; //Not sure se n falta aqui uma condiçao
                     break;
