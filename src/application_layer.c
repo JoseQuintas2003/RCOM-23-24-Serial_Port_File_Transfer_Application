@@ -21,7 +21,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     linkLayer.baudRate = baudRate;
     linkLayer.nRetransmissions = nTries;
     linkLayer.timeout = timeout;
-    unsigned char *packet;
+    unsigned char* packet;
     
     int fd =  llopen(linkLayer);
     if (fd < 0)
@@ -50,6 +50,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             perror("Error getting file size");
             exit(-1);
         }
+
+        packet = malloc(fileSize + 4);
     
         unsigned int ControlPacketSize;
         unsigned char *ControlPacketStart = (unsigned char *)malloc(MAX_PAYLOAD_SIZE);
@@ -57,7 +59,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         ControlPacketStart[0] = 2;
         // 0 – tamanho do ficheiro
         ControlPacketStart[1] = 0;
-        ControlPacketStart[2] = (fileSize + 7) / 8;
+        ControlPacketStart[2] = 4;
 
         for (unsigned char i = 0; i < ControlPacketStart[2]; i++)
         {
@@ -69,7 +71,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         ControlPacketStart[3 + ControlPacketStart[2]] = 1;
         ControlPacketStart[4 + ControlPacketStart[2]] = strlen(filename);
 
-        memcpy(ControlPacketStart + 5 + ControlPacketStart[2], filename, strlen(filename));
+        for (int i = 0; i < strlen(filename); i++)
+        {
+            ControlPacketStart[5 + ControlPacketStart[2] + i] = filename[i];
+        }
+
+        ControlPacketSize = 5 + ControlPacketStart[2] + strlen(filename);
+
+        //memcpy(ControlPacketStart + 5 + ControlPacketStart[2], filename, strlen(filename));
 
         if (llwrite(ControlPacketStart, ControlPacketSize) == -1)
         {
@@ -129,57 +138,69 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             exit(-1);
         }
 
-        llclose(fd);
+        free(packet);
         break;
     }
     
     case LlRx: {
+    packet = malloc(65535);
+
+    printf("Application layer RX\n"); //Apagar depois
         
-        while (1)
-        {
-            while (llread(packet) < 0){
-                
-                if (packet[0] == 2)
+    while (1)
+    {
+        while (llread(packet) < 0){
+            
+            if (packet[0] == 2)
+            {
+                long int rxFileSize = 0;
+                unsigned char *name = (unsigned char *)malloc(packet[4 + packet[3]]);
+
+                for (unsigned char i = 0; i < packet[3]; i++)
                 {
-                    long int rxFileSize = 0;
-                    unsigned char *name = (unsigned char *)malloc(packet[4 + packet[3]]);
-
-                    for (unsigned char i = 0; i < packet[3]; i++)
-                    {
-                        rxFileSize |= (packet[3 + 2 + i] << (8 * i));
-                    }
-
-                    memcpy(name, packet + 5 + packet[3], packet[4 + packet[3]]);
-
-                    FILE *newFile = fopen((char *)name, "wb+");
-                    while (1)
-                    {
-                        while (llread(packet) < 0)
-                            ;
-                        if (packet[0] != 3)
-                        {
-                            unsigned char *buffer = (unsigned char *)malloc(packet[3]);
-                            memcpy(buffer, packet + 4, packet[3]);
-                            fwrite(buffer, sizeof(unsigned char), packet[3], newFile);
-                            free(buffer);
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-
-                    fclose(newFile);
-                    break;
+                    rxFileSize |= (packet[3 + 2 + i] << (8 * i));
                 }
+
+                memcpy(name, packet + 5 + packet[3], packet[4 + packet[3]]);
+
+                FILE *newFile = fopen((char *)name, "wb+");
+                while (1)
+                {
+                    while (llread(packet) < 0)
+                        ;
+                    if (packet[0] != 3)
+                    {
+                        unsigned char *buffer = (unsigned char *)malloc(packet[3]);
+                        memcpy(buffer, packet + 4, packet[3]);
+                        fwrite(buffer, sizeof(unsigned char), packet[3], newFile);
+                        free(buffer);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                fclose(newFile);
+                break;
             }
         }
+    }
 
-        break;
+    break;
     }
     
     default:
         exit(-1);
         break;
     }
+
+    
+    if (llclose(0) == -1)
+    {
+        perror("Error closing connection\n");
+        exit(-1);
+    }
+
+    printf("Connection closed\n");
 }
