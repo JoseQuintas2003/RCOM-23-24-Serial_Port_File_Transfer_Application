@@ -41,7 +41,7 @@ struct termios oldtio;
 int fd;
 int alarmEnabled = FALSE;
 int alarmCount = 0;
-int retransmissions = 0;
+int retransmissions;
 int timeout = 0;
 LinkLayerRole role;
 
@@ -49,8 +49,8 @@ LinkLayerRole role;
 // Alarm function handler
 void alarmHandler(int signal)
 {
+    alarmCount += 1;
     alarmEnabled = FALSE;
-    alarmCount++;
 
     printf("Alarm #%d\n", alarmCount);
 }
@@ -62,6 +62,8 @@ int llopen(LinkLayer connectionParameters)
 {
     // Program usage: Uses either COM1 or COM2
     const char *serialPortName = connectionParameters.serialPort;
+
+    alarmEnabled = FALSE;
 
     fd = open(serialPortName, O_RDWR | O_NOCTTY);
     if (fd < 0)
@@ -87,7 +89,7 @@ int llopen(LinkLayer connectionParameters)
     newtio.c_oflag = 0;
     newtio.c_lflag = 0;
     newtio.c_cc[VTIME] = 0;
-    newtio.c_cc[VMIN] = 1;
+    newtio.c_cc[VMIN] = 0;
 
     tcflush(fd, TCIOFLUSH);
 
@@ -121,59 +123,62 @@ int llopen(LinkLayer connectionParameters)
         while (alarmCount <= retransmissions && state != STOP_R){
             if (alarmEnabled == FALSE)
             {
+                alarm(1);
+                alarmEnabled = TRUE;
 
                 // Send SET
                 int bytes = write(fd, byte, 5);
                 printf("SET sent\n");
                 printf("Bytes written: %d\n", bytes);
-
-                alarm(timeout);
-                alarmEnabled = TRUE;
             }
-
-            if (read(fd, byte, 1) > 0)
+            int bytes = read(fd, byte, 1);
+            if (bytes > 0)
             {
                 switch (state)
                 {
-                case START:
-                    if (byte[0] == FLAG)
-                        state = FLAG_RCV;
-                    break;
-                case FLAG_RCV:
-                    if (byte[0] == REC_ADR)
-                        state = A_RCV;
-                    else if (byte[0] != FLAG)
-                        state = START;
-                    break;
-                case A_RCV:
-                    if (byte[0] == UA)
-                        state = C_RCV;
-                    else if (byte[0] == FLAG)
-                        state = FLAG_RCV;
-                    else
-                        state = START;
-                    break;
-                case C_RCV:
-                    if (byte[0] == (REC_ADR ^ UA))
-                        state = BCC1_OK;
-                    else if (byte[0] == FLAG)
-                        state = FLAG_RCV;
-                    else
-                        state = START;
-                    break;
-                case BCC1_OK:
-                    if (byte[0] == FLAG){
-                        state = STOP_R;
-                        printf("UA received successfully\n");
-                    }
-                    else {
-                        state = START;
-                    }
-                    break;
-                default:
-                    break;
+                    case START:
+                        if (byte[0] == FLAG)
+                            state = FLAG_RCV;
+                        break;
+                    case FLAG_RCV:
+                        if (byte[0] == REC_ADR)
+                            state = A_RCV;
+                        else if (byte[0] != FLAG)
+                            state = START;
+                        break;
+                    case A_RCV:
+                        if (byte[0] == UA)
+                            state = C_RCV;
+                        else if (byte[0] == FLAG)
+                            state = FLAG_RCV;
+                        else
+                            state = START;
+                        break;
+                    case C_RCV:
+                        if (byte[0] == (REC_ADR ^ UA))
+                            state = BCC1_OK;
+                        else if (byte[0] == FLAG)
+                            state = FLAG_RCV;
+                        else
+                            state = START;
+                        break;
+                    case BCC1_OK:
+                        if (byte[0] == FLAG){
+                            state = STOP_R;
+                            printf("UA received successfully\n");
+                        }
+                        else {
+                            state = START;
+                        }
+                        break;
+                    default:
+                        break;
                 }
             }
+        }
+        if (state != STOP_R) {
+            printf("Connection failed\n");
+            return -1;
         }
     }
 
@@ -258,11 +263,9 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
-    printf("Called llwrite()\n");
     unsigned char tramaTx = 0;
     int frameSize = 6+bufSize;
-    printf("framesize: %d\n", frameSize);
-    unsigned char *frame = (unsigned char *) malloc(frameSize);
+    unsigned char *frame = (unsigned char *) malloc(2*frameSize);
     if (frame == NULL) {
         // Memory allocation failed
         perror("Memory allocation error");
@@ -284,10 +287,11 @@ int llwrite(const unsigned char *buf, int bufSize)
     int j = 4;
     for (unsigned int i = 0 ; i < bufSize ; i++) {
         if(buf[i] == FLAG || buf[i] == ESC) {
-            frame = realloc(frame,++frameSize);
             frame[j++] = ESC;
+            if(buf[i] == FLAG) frame[j++] = F_ESC;
+            else frame[j++] = E_ESC;        
         }
-        frame[j++] = buf[i];
+        else frame[j++] = buf[i];
     }
     frame[j++] = BCC2;
     frame[j++] = FLAG;
@@ -375,7 +379,6 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char * packet)
 {
-    printf("Called llread()\n");
     LinkLayerState state = START;
 
     unsigned char writeBuffer[6] = {0}; // 5 bytes for information feedback plus 1 byte for the '\0' character
@@ -396,14 +399,12 @@ int llread(unsigned char * packet)
                 case START:
                     if (byte[0] == FLAG){
                         state = FLAG_RCV; 
-                        printf("FLAG received\n");
                     } 
                     break;
                 case FLAG_RCV:
                     if (byte[0] == TT_ADR){
                         state = A_RCV;
                         rec_a = byte[0];
-                        printf("Transmitter address received\n");
                     }
                     else if (byte[0] != FLAG) state = START;
                     break;
@@ -411,7 +412,6 @@ int llread(unsigned char * packet)
                     if (byte[0] == INF0 || byte[0] == INF1){
                         state = C_RCV;
                         rec_c = byte[0]; 
-                        printf("Control field received\n");
                     }
                     else if (byte[0] == FLAG) state = FLAG_RCV;
                     //else if (byte[0] == DISC) state = DISCONNECTED;
@@ -420,7 +420,6 @@ int llread(unsigned char * packet)
                 case C_RCV:
                     if (byte[0] == (rec_a ^ rec_c)){
                         state = READING_DATA; 
-                        printf("BCC1 received\n");
                     } 
                     else if (byte[0] == FLAG) state = FLAG_RCV;
                     else state = START;
@@ -428,13 +427,11 @@ int llread(unsigned char * packet)
                 case READING_DATA:
                     if (byte[0] == ESC) {
                         state = DATA_FOUND_ESC;
-                        printf("ESC received\n");
                     }
                     else if (byte[0] == FLAG) { //If the byte is a FLAG, it means that the data has ended
-                        printf("Ending FLAG received\n");
-                        rec_bcc2 = packet[data_position-1]; //Stores the recieved BCC2
+                        rec_bcc2 = packet[data_position-1]; //Stores the received BCC2
                         
-                        packet[data_position-1] = '\0'; //Ends the recieved data string
+                        packet[data_position-1] = '\0'; //Ends the received data string
 
                         
                         data_check = packet[0]; //Stores the first byte of the data
@@ -454,7 +451,7 @@ int llread(unsigned char * packet)
                             writeBuffer[5] = '\0';
                             write(fd, writeBuffer, 5);
 
-                            printf("Data received successfully.\n Recieved data with %d bytes \n", data_position);
+                            printf("Data received successfully.\nReceived data with %d bytes \n", data_position);
 
                             state = STOP_R;
 
@@ -478,38 +475,18 @@ int llread(unsigned char * packet)
                         }
                     }
                     else {
-                        packet[data_position] = byte[0];
-                        data_position++;
-                        printf("Data byte received\n");
+                        packet[data_position++] = byte[0];
                     }
                     break;
                 case DATA_FOUND_ESC:
                     if (byte[0] == F_ESC) {
-                        packet[data_position] = FLAG;
-                        data_position++;
+                        packet[data_position++] = FLAG;
                     }
                     else if (byte[0] == E_ESC) {
-                        packet[data_position] = ESC;
-                        data_position++;
+                        packet[data_position++] = ESC;
                     }
                     state = READING_DATA; //Not sure se n falta aqui uma condiçao
                     break;
-                /*
-                case DISCONNECTED:
-                    printf("Transmitter DISC received\n");
-                    if (byte[0] == (rec_a ^ rec_c)){ 
-                        printf("BCC1 received\n");
-
-                        writeBuffer[0] = FLAG;
-                        writeBuffer[1] = REC_ADR;
-                        writeBuffer[2] = DISC;
-                        writeBuffer[3] = writeBuffer[1] ^ writeBuffer[2];
-                        writeBuffer[4] = FLAG;
-                        writeBuffer[5] = '\0';
-                        int bytes = write(fd, writeBuffer, 5);
-                        printf("Receiver DISC sent with %d\n", bytes);
-                    } 
-                */
                 default: 
                     break;
             }
@@ -524,18 +501,12 @@ int llread(unsigned char * packet)
 ////////////////////////////////////////////////
 int llclose(int fd)
 {
-    printf("Called llclose()\n");
     LinkLayerState state;
     unsigned char byte[5] = {0};
     int nretransmissions = retransmissions;
-    
-    if(!role) printf("Transmitter\n");
-    else if (role) printf("Reciever\n");
 
     //Transmitter role
     if (!role){
-
-        printf("In trasmitter role\n");
 
         state = START;
 
@@ -610,8 +581,6 @@ int llclose(int fd)
     //Receiver role
     if (role){
 
-        printf("In reciever role\n");
-
         state = START;
         nretransmissions = retransmissions;
 
@@ -634,28 +603,23 @@ int llclose(int fd)
                 if (read(fd, &byte, 1) > 0) {
                     switch (state) {
                         case START:
-                            printf("DISC connection started\n");
                             if (byte[0] == FLAG) state = FLAG_RCV;
                             break;
                         case FLAG_RCV:
-                            printf("FLAG recieved\n");
                             if (byte[0] == TT_ADR) state = A_RCV;
                             else if (byte[0] != FLAG) state = START;
                             break;
                         case A_RCV:
-                            printf("A recieved\n");
                             if (byte[0] == DISC) state = C_RCV;
                             else if (byte[0] == FLAG) state = FLAG_RCV;
                             else state = START;
                             break;
                         case C_RCV:
-                            printf("C recieved\n");
                             if (byte[0] == (TT_ADR ^ DISC)) state = BCC1_OK;
                             else if (byte[0] == FLAG) state = FLAG_RCV;
                             else state = START;
                             break;
                         case BCC1_OK:
-                            printf("BCC1 ok\n");
                             if (byte[0] == FLAG) state = STOP_R;
                             else state = START;
                             printf("Transmitter DISC received successfully\n");
@@ -734,40 +698,3 @@ int llclose(int fd)
     return close(fd);
 
 }
-
-/*
-int main(int argc, char *argv[]){
-    if (argc < 3)
-    {
-        printf("Usage: %s /dev/ttySxx tx|rx filename\n", argv[0]);
-        exit(1);
-    }
-
-    const char *serialPort = argv[1];
-
-    int individual; //mudar nome depois
-    sscanf(argv[2], "%d", &individual);
-    //const char *filename = argv[3]; Por enquanto, n precisamos disto
-
-    LinkLayer linkLayer;
-    sprintf(linkLayer.serialPort, "%s", serialPort);
-
-    if (!individual)
-        linkLayer.role = LlTx;
-    else if (individual)
-        linkLayer.role = LlRx;
-    else
-    {
-        printf("Invalid role: %s\n", argv[2]);
-        exit(1);
-    }
-
-    llopen(linkLayer);
-    printf("After llopen()\n");
-    //llwrite(...);
-
-    llclose(fd);
-
-    return 0;
-}
-*/

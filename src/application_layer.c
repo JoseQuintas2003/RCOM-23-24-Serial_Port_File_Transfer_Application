@@ -1,14 +1,10 @@
 // Application layer protocol implementation
-
-#include "application_layer.h"
-#include "link_layer.h"
+#include "../include/link_layer.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-//#include <math.h>
+#include <math.h>
 
 #define RX_START 0x02
 #define RX_DATA 0x01
@@ -128,7 +124,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         controlPacketEnd[0] = 3;
         // 0 – tamanho do ficheiro
         controlPacketEnd[1] = 0;
-        controlPacketEnd[2] = (fileSize + 7) / 8;
+        controlPacketEnd[2] = 4;
 
         controlPacketEnd[3] = len1;
         controlPacketEnd[4] = len2;
@@ -165,7 +161,6 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         int state = RX_START;
 
         while (state != RX_END){
-            printf("Waiting for packet\n");
             if (llread(packet) == -1)
             {
                 perror("An error occured while reading packet\n");
@@ -174,14 +169,13 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
             switch (state){
                 case RX_START:
-                    printf("Packet received\n");
                     if (packet[0] == 2){
                         state = RX_DATA;
                         unsigned char filename[packet[4 + packet[2]] + 1];
 
                         if (packet[1] == 0) {
                             for (int i = 0; i < packet[2]; i++) {
-                                fileSize += packet[3 + i] * pow(256,1);
+                                fileSize += packet[3 + i] * pow(256,i);
                             }
                             printf("File size: %ld\n", fileSize);
                         }
@@ -206,7 +200,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                     break;
                 case RX_DATA:
                     if (packet[0] == 1) {
-                        fwrite(packet + 4, sizeof(unsigned char), packet[2] * 256 + packet[3], file);
+                        fwrite(packet + 4, packet[2] * 256 + packet[3], 1, file);
                     }
                     else if (packet[0] == 3) {
                         state = RX_END;
@@ -214,6 +208,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                         for (int i = 0; i < packet[2]; i++) {
                             fileSize2 += packet[3 + i] * pow(256,i);
                         }
+
+                        printf("Final file size: %d\n", fileSize2);
+
                         if (fileSize != fileSize2) {
                             perror("Error: file size doesn't match\n");
                             exit(-1);
@@ -238,13 +235,4 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     }
 
     printf("Connection closed\n");
-}
-
-int pow(int base, int exponent) {
-    int result = 1;
-    while (exponent > 0) {
-        result *= base;
-        exponent--;
-    }
-    return result;
 }
