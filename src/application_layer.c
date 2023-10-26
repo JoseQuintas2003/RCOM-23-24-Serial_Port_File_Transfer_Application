@@ -1,9 +1,12 @@
 // Application layer protocol implementation
+
+#include "../include/application_layer.h"
 #include "../include/link_layer.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <math.h>
 
 #define RX_START 0x02
@@ -236,3 +239,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
     printf("Connection closed\n");
 }
+
+/*
+int pow(int base, int exponent) {
+    int result = 1;
+    while (exponent > 0) {
+        result *= base;
+        exponent--;
+    }
+    return result;
+}
+*/

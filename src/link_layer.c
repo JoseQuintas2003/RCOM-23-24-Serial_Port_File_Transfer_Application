@@ -438,6 +438,7 @@ int llread(unsigned char * packet)
 
                         for (int j = 1; j < data_position-1; j++) data_check ^= packet[j]; //XORs all the bytes of the data to check if the BCC2 is correct
 
+                        printf("Received bcc: %x\nCalculated bcc: %x.\n", rec_bcc2, data_check);
 
                         if (data_check == rec_bcc2) { //If the BCC2 is correct, send RR[0/1] to the transmitter
                             writeBuffer[0] = FLAG;
