@@ -105,7 +105,7 @@ int llopen(LinkLayer connectionParameters)
     role = connectionParameters.role;
 
     //Transmitter role
-    if (connectionParameters.role){
+    if (!role){
         state = START;
 
         // Set alarm function handler
@@ -166,8 +166,9 @@ int llopen(LinkLayer connectionParameters)
                         state = STOP_R;
                         printf("UA received successfully\n");
                     }
-                    else
+                    else {
                         state = START;
+                    }
                     break;
                 default:
                     break;
@@ -177,7 +178,7 @@ int llopen(LinkLayer connectionParameters)
     }
 
     //Receiver role
-    if (!connectionParameters.role){
+    if (role){
         state = START;
 
         // Create UA packet
@@ -248,7 +249,7 @@ int llopen(LinkLayer connectionParameters)
         printf("Bytes written: %d\n", bytes);
     }
 
-    
+    printf("Connection established successfully\n");
     return fd;
 }
 
@@ -257,12 +258,16 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
+    printf("Called llwrite()\n");
     unsigned char tramaTx = 0;
     int frameSize = 6+bufSize;
+    printf("framesize: %d\n", frameSize);
     unsigned char *frame = (unsigned char *) malloc(frameSize);
     if (frame == NULL) {
         // Memory allocation failed
-        printf("Memory allocation error");
+        printf("Memory allocation error. Requested size: %d\n", frameSize);
+        perror("Memory allocation error");
+        exit(-1);
     }
     frame[0] = FLAG;
     frame[1] = REC_ADR;
@@ -273,6 +278,7 @@ int llwrite(const unsigned char *buf, int bufSize)
     frame[3] = frame[1] ^ frame[2];
     
     memcpy(frame+4, buf, bufSize);
+    
     unsigned char BCC2 = buf[0];
     for (unsigned int i = 1 ; i < bufSize ; i++) BCC2 ^= buf[i];
 
@@ -368,6 +374,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char * packet)
 {
+    printf("Called llread()\n");
     LinkLayerState state = START;
 
     unsigned char writeBuffer[6] = {0}; // 5 bytes for information feedback plus 1 byte for the '\0' character
