@@ -7,11 +7,19 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <math.h>
 
 #define RX_START 0x02
 #define RX_DATA 0x01
 #define RX_END 0x03
+
+double pow(double base, double exponent) {
+    double result = 1;
+    while (exponent > 0) {
+        result *= base;
+        exponent--;
+    }
+    return result;
+}
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
                       int nTries, int timeout, const char *filename)
@@ -240,13 +248,3 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     printf("Connection closed\n");
 }
 
-/*
-int pow(int base, int exponent) {
-    int result = 1;
-    while (exponent > 0) {
-        result *= base;
-        exponent--;
-    }
-    return result;
-}
-*/

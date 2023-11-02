@@ -50,7 +50,7 @@ LinkLayerRole role;
 void alarmHandler(int signal)
 {
     alarmCount += 1;
-    alarmEnabled = FALSE;
+    alarmEnabled = TRUE;
 
     printf("Alarm #%d\n", alarmCount);
 }
@@ -123,8 +123,8 @@ int llopen(LinkLayer connectionParameters)
         while (alarmCount <= retransmissions && state != STOP_R){
             if (alarmEnabled == FALSE)
             {
-                alarm(1);
-                alarmEnabled = TRUE;
+                alarm(timeout);
+                alarmEnabled = FALSE;
 
                 // Send SET
                 int bytes = write(fd, byte, 5);
@@ -367,7 +367,6 @@ int llwrite(const unsigned char *buf, int bufSize)
     free(frame);
     if(ready) return frameSize;
     else{
-        llclose(fd);
         return -1;
     }
 
