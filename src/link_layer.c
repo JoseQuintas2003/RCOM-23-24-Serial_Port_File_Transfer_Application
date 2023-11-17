@@ -298,9 +298,16 @@ int llwrite(const unsigned char *buf, int bufSize)
 
     int numTries = 0;
     int rejected = 0, ready = 0;
+    int bytes_written;
+    unsigned char byte = 0;
+    unsigned char C = 0;
+    LinkLayerState state = START;
 
     while (numTries < retransmissions) { 
         
+        if(rejected == 1) {
+            printf("The frame has been rejected\n");
+        }
         alarmEnabled = FALSE;
         alarm(timeout);
         rejected = 0;
@@ -308,11 +315,11 @@ int llwrite(const unsigned char *buf, int bufSize)
 
         while (alarmEnabled == FALSE && !rejected && !ready) {
 
-            int bytes_written = write(fd, frame, j);
+            bytes_written = write(fd, frame, j);
             printf("Bytes written: %d\n", bytes_written);
-            unsigned char byte=0;
-            unsigned char C = 0;
-            LinkLayerState state = START;
+            byte=0;
+            C = 0;
+            state = START;
              
             while (state != STOP_R && alarmEnabled == FALSE) {   
                 
@@ -352,13 +359,16 @@ int llwrite(const unsigned char *buf, int bufSize)
             
             if (state == STOP_R) {
                 if (C == REJ0 || C == REJ1) { //Aqui nao devia ser a variavel C ao inves de byte?
+                    printf("Received REJ\n");
                     rejected = 1;
+                    ready = 0;
                 } else if (C == RR0 || C == RR1) {
+                    printf("Received RR\n");
                     ready = 1;
                     tramaTx = (tramaTx + 1) % 2;
                 }
             }
-
+            if (rejected) break;
         }
         if (ready) break;
         numTries++;

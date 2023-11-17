@@ -127,6 +127,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
             bytesLeft -= (long int)MAX_PAYLOAD_SIZE;
             sequence = (sequence + 1) % 255;
+
+            sleep(1);
         }
         printf("Data packets sent\n");
 
@@ -172,12 +174,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         int state = RX_START;
 
         while (state != RX_END){
-            if (llread(packet) == -1)
-            {
-                perror("An error occured while reading packet\n");
-                exit(-1);
-            }
-
+            if (llread(packet) < 0) perror("An error occured while reading packet\n");
+            else printf("Packet received\n");
+            
             switch (state){
                 case RX_START:
                     if (packet[0] == 2){
