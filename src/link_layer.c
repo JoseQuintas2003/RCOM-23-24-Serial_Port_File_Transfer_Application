@@ -368,10 +368,14 @@ int llwrite(const unsigned char *buf, int bufSize)
                     tramaTx = (tramaTx + 1) % 2;
                 }
             }
-            if (rejected) break;
+            if (rejected) {
+                numTries++;
+                break;
+            }
         }
         if (ready) break;
-        numTries++;
+        if (!rejected) numTries++;
+        printf("NumTries: %d\n", numTries);
     }
        
     free(frame);

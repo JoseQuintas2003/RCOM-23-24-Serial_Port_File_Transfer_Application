@@ -118,17 +118,15 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             packet[2] = dataSize >> 8 & 0xFF;
             packet[3] = dataSize & 0xFF;
             memcpy(packet + 4, data, dataSize);
-
-            if (llwrite(packet, packetSize) == -1)
+            
+            int bytes_written = llwrite(packet, packetSize);
+            if (bytes_written == -1)
             {
-                perror("Error in data packets\n");
-                exit(-1);
+                perror("Error in data packets. Retransmission timeout\n");
             }
 
             bytesLeft -= (long int)MAX_PAYLOAD_SIZE;
             sequence = (sequence + 1) % 255;
-
-            sleep(1);
         }
         printf("Data packets sent\n");
 
@@ -174,7 +172,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         int state = RX_START;
 
         while (state != RX_END){
-            if (llread(packet) < 0) perror("An error occured while reading packet\n");
+            if (llread(packet) < 0){
+                perror("An error occured while reading packet\n");
+                continue;
+            }
             else printf("Packet received\n");
             
             switch (state){
