@@ -358,7 +358,7 @@ int llwrite(const unsigned char *buf, int bufSize)
             } 
             
             if (state == STOP_R) {
-                if (C == REJ0 || C == REJ1) { //Aqui nao devia ser a variavel C ao inves de byte?
+                if (C == REJ0 || C == REJ1) { 
                     printf("Received REJ\n");
                     rejected = 1;
                     ready = 0;
@@ -375,7 +375,6 @@ int llwrite(const unsigned char *buf, int bufSize)
         }
         if (ready) break;
         if (!rejected) numTries++;
-        printf("NumTries: %d\n", numTries);
     }
        
     free(frame);
@@ -427,7 +426,6 @@ int llread(unsigned char * packet)
                         rec_c = byte[0]; 
                     }
                     else if (byte[0] == FLAG) state = FLAG_RCV;
-                    //else if (byte[0] == DISC) state = DISCONNECTED;
                     else state = START;
                     break;
                 case C_RCV:
@@ -497,7 +495,7 @@ int llread(unsigned char * packet)
                     else if (byte[0] == E_ESC) {
                         packet[data_position++] = ESC;
                     }
-                    state = READING_DATA; //Not sure se n falta aqui uma condiçao
+                    state = READING_DATA;
                     break;
                 default: 
                     break;
